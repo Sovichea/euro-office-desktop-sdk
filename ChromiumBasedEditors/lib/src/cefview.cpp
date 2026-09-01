@@ -86,6 +86,29 @@ void CCefViewWidgetImpl::SetParentNull(WindowHandleId handle)
 
 #include "./cors_resource_hanler.h"
 
+namespace
+{
+	bool SetJsonBoolean(std::wstring& json, const CefString& name, bool value)
+	{
+		CefRefPtr<CefValue> root;
+		if (json.empty())
+		{
+			root = CefValue::Create();
+			root->SetDictionary(CefDictionaryValue::Create());
+		}
+		else
+		{
+			root = CefParseJSON(json, JSON_PARSER_RFC);
+			if (!root || root->GetType() != VTYPE_DICTIONARY)
+				return false;
+		}
+
+		root->GetDictionary()->SetBool(name, value);
+		json = CefWriteJSON(root, JSON_WRITER_DEFAULT).ToWString();
+		return true;
+	}
+}
+
 std::wstring GetUrlWithoutProtocol(const std::wstring& url)
 {
 	if (0 == url.find(L"http://"))
@@ -3137,6 +3160,12 @@ public:
 					pData->put_Path(NSFile::GetFileName(m_pParent->m_pInternal->m_oLocalInfo.m_oInfo.m_sFileSrc));
 
 				pData->put_FileType(m_pParent->m_pInternal->m_oLocalInfo.m_oInfo.m_nCurrentFileFormat);
+				const int nEditorType = m_pParent->m_pInternal->m_nEditorType;
+				pData->put_EnhancedUnicodeAvailable(
+					nEditorType == static_cast<int>(AscEditorType::etDocument) ||
+					nEditorType == static_cast<int>(AscEditorType::etPresentation) ||
+					nEditorType == static_cast<int>(AscEditorType::etSpreadsheet) ||
+					nEditorType == static_cast<int>(AscEditorType::etDraw));
 				if (nSaveFileType == 0)
 					m_pParent->m_pInternal->LocalFile_GetSupportSaveFormats(pData->get_SupportFormats());
 				else
@@ -7540,7 +7569,17 @@ void CCefView::Apply(NSEditorApi::CAscMenuEvent* pEvent)
 		else
 		{
 			int nFileType = pData->get_FileType();
-			m_pInternal->LocalFile_SaveStart(sPath, nFileType);
+			bool bOptionsReady = true;
+			if (nFileType == AVS_OFFICESTUDIO_FILE_CROSSPLATFORM_PDF)
+				bOptionsReady = SetJsonBoolean(m_pInternal->m_oLocalInfo.m_oInfo.m_sSaveJsonParams,
+				                               "enhancedUnicode", pData->get_EnhancedUnicode());
+			if (bOptionsReady)
+				m_pInternal->LocalFile_SaveStart(sPath, nFileType);
+			else
+			{
+				m_pInternal->LocalFile_SaveEnd(1);
+				m_pInternal->m_bIsBuilding = false;
+			}
 		}
 		break;
 	}
