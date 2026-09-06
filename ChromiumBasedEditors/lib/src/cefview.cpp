@@ -4625,11 +4625,25 @@ public:
 		pSaver->m_oPrintData.m_sFrameUrl = args->GetString(2).ToWString();
 		pSaver->m_oPrintData.m_sThemesUrl = args->GetString(3).ToWString();
 		pSaver->m_oPrintData.CalculateImagePaths(false);
+		const bool hasPreselectedOutputPath = args->GetSize() > 6 && !args->GetString(6).empty();
+		// Keep the display-list document context unchanged. Local media lives in
+		// the recovery directory, so override only the image lookup root for the
+		// exact-layout desktop Save As route.
+		if (hasPreselectedOutputPath &&
+			!m_pParent->m_pInternal->m_oLocalInfo.m_oInfo.m_sRecoveryDir.empty())
+			pSaver->m_oPrintData.m_sDocumentImagesPath =
+				m_pParent->m_pInternal->m_oLocalInfo.m_oInfo.m_sRecoveryDir + L"/";
 		pSaver->m_nOutputFormat = args->GetInt(5);
 		pSaver->LoadData(args->GetString(4).ToString());
 
 		m_pParent->m_pInternal->m_pCloudSaveToDrawing = pSaver;
 		m_pParent->m_pInternal->m_pCloudSaveToDrawing->DestroyOnFinish();
+		if (hasPreselectedOutputPath)
+		{
+			m_pParent->m_pInternal->m_pCloudSaveToDrawing->m_sOutputFileName = args->GetString(6).ToWString();
+			m_pParent->m_pInternal->m_pCloudSaveToDrawing->Start(0);
+			return true;
+		}
 
 		COfficeFileFormatChecker oChecker;
 		int nFileType = pSaver->m_nOutputFormat;
@@ -7569,6 +7583,23 @@ void CCefView::Apply(NSEditorApi::CAscMenuEvent* pEvent)
 		else
 		{
 			int nFileType = pData->get_FileType();
+			if (nFileType == AVS_OFFICESTUDIO_FILE_CROSSPLATFORM_PDF ||
+				nFileType == AVS_OFFICESTUDIO_FILE_CROSSPLATFORM_PDFA)
+			{
+				CefRefPtr<CefFrame> frame = m_pInternal->GetBrowser()
+					? m_pInternal->GetBrowser()->GetFrame("frameEditor") : nullptr;
+				if (frame)
+				{
+					CefRefPtr<CefValue> pathValue = CefValue::Create();
+					pathValue->SetString(sPath);
+					std::wstring quotedPath = CefWriteJSON(pathValue, JSON_WRITER_DEFAULT).ToWString();
+					std::wstring code = L"window.DesktopOfflineAppDocumentSavePdfFromCurrentLayout(" +
+						std::to_wstring(nFileType) + L"," + quotedPath + L"," +
+						(pData->get_EnhancedUnicode() ? L"true" : L"false") + L");";
+					frame->ExecuteJavaScript(code, frame->GetURL(), 0);
+					break;
+				}
+			}
 			bool bOptionsReady = true;
 			if (nFileType == AVS_OFFICESTUDIO_FILE_CROSSPLATFORM_PDF)
 				bOptionsReady = SetJsonBoolean(m_pInternal->m_oLocalInfo.m_oInfo.m_sSaveJsonParams,
